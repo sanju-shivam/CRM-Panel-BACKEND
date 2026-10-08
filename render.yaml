@@ -1,0 +1,35 @@
+# Render Blueprint for the API (repository root = this backend folder).
+# Render -> New -> Blueprint -> pick this repository. Values marked
+# `sync: false` are prompted for once in the dashboard and never committed.
+services:
+  - type: web
+    name: crm-api
+    runtime: node
+    plan: free
+    # Keep this close to the Supabase project's region (latency per query).
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build
+    # Pending migrations are applied on every boot (idempotent). The free plan
+    # has no pre-deploy step, so it runs here. Seeding stays a manual step.
+    startCommand: npx prisma migrate deploy && node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: DEFAULT_ACCOUNT_ID
+        value: 00000000-0000-4000-8000-0000000000aa
+      # The frontend static site URL(s), comma-separated.
+      - key: CORS_ORIGIN
+        sync: false
+      # Supabase POOLER urls (IPv4); the direct db.<ref>.supabase.co host is
+      # IPv6-only and unreachable from Render.
+      #   DATABASE_URL: transaction pooler :6543 + ?pgbouncer=true&connection_limit=5
+      #   DIRECT_URL:   session pooler :5432 (used by `prisma migrate deploy`)
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false

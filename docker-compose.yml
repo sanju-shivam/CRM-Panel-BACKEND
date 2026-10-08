@@ -1,0 +1,33 @@
+# Local development/test database only.
+#
+# Production runs on Supabase (see README, "Deployment"). This container
+# exists so that:
+#   - the backend tests and the E2E suite can create and drop their own
+#     throwaway databases (crm_test, crm_e2e) - they must never run against
+#     Supabase because they wipe data;
+#   - anyone can run the project locally without the Supabase credentials.
+#
+#   docker compose up -d        # PostgreSQL 16 on localhost:5432 (postgres/postgres)
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: crm_dev
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Persistent volume: data survives container recreation.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crm_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  pgdata:

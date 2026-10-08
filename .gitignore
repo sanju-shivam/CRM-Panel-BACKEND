@@ -1,0 +1,15 @@
+node_modules/
+dist/
+src/generated/
+coverage/
+
+# Never commit secrets; .env.test only holds local test-database settings.
+.env
+.env.local
+.env.*.local
+
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,134 @@
+// CRM Contact Workspace - Prisma schema.
+// PostgreSQL is the source of truth for data integrity: every important
+// invariant below is enforced by a database constraint, not by application
+// code alone.
+
+generator client {
+  provider        = "prisma-client"
+  moduleFormat    = "cjs"
+  // Partial (conditional) indexes are still a preview feature in Prisma 7;
+  // required for the partial unique email index declared on Contact below.
+  previewFeatures = ["partialIndexes"]
+  // Generated TypeScript lives inside src/ so the application build (tsc)
+  // compiles it together with the rest of the codebase.
+  output          = "../src/generated/prisma"
+}
+
+// Connection URLs do NOT belong here in Prisma 7 (`url`/`directUrl` were
+// removed from the schema and now cause a validation error). The Prisma CLI
+// reads them from prisma7.config.ts; the runtime client reads DATABASE_URL
+// through src/lib/prisma.ts. See the README, "Database Setup".
+datasource db {
+  provider = "postgresql"
+}
+
+model Account {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  contacts Contact[]
+  tags     Tag[]
+
+  @@map("accounts")
+}
+
+model Contact {
+  id        String   @id @default(uuid()) @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  firstName String   @map("first_name") @db.VarChar(100)
+  lastName  String   @map("last_name") @db.VarChar(100)
+  // Nullable email: ~10% of seeded contacts have none. Email uniqueness is
+  // enforced by the partial unique index declared below: one email per
+  // account for every non-null email, while any number of NULL emails is
+  // allowed (PostgreSQL never indexes NULL rows for this index).
+  email     String?  @db.VarChar(255)
+  phone     String?  @db.VarChar(50)
+  company   String?  @db.VarChar(255)
+  // Optimistic-concurrency token. Incremented by the database inside every
+  // update statement (see contacts.repository.ts).
+  version   Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  account    Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tags       ContactTag[]
+  activities ContactActivity[]
+
+  // Partial unique index: "email is unique per account when it exists".
+  // Declared in the schema (not just raw SQL) so `prisma migrate dev` sees it
+  // as part of the data model instead of drift. Business rule: email must be
+  // unique per account when an email exists, while multiple contacts may have
+  // NULL email. The database remains the source of truth - the application
+  // does not re-implement this check.
+  @@unique([accountId, email], map: "uq_contacts_account_email_not_null", where: raw("email IS NOT NULL"))
+  @@index([accountId, company])
+  // Sort indexes include the id tie-breaker used by the list ORDER BY.
+  @@index([accountId, createdAt, id])
+  @@index([accountId, lastName, firstName, id])
+  @@index([accountId, phone])
+  // GIN trigram indexes back the ILIKE '%term%' search and company filter
+  // (pg_trgm in the `extensions` schema - see migration
+  // 20261008120000_search_trgm_and_sort_indexes).
+  @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "contacts_first_name_trgm_idx")
+  @@index([lastName(ops: raw("gin_trgm_ops"))], type: Gin, map: "contacts_last_name_trgm_idx")
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "contacts_email_trgm_idx")
+  @@index([phone(ops: raw("gin_trgm_ops"))], type: Gin, map: "contacts_phone_trgm_idx")
+  @@index([company(ops: raw("gin_trgm_ops"))], type: Gin, map: "contacts_company_trgm_idx")
+  @@map("contacts")
+}
+
+model Tag {
+  id        String   @id @default(uuid()) @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  name      String   @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  account   Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  contacts  ContactTag[]
+
+  @@unique([accountId, name])
+  @@index([accountId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  contactId  String   @map("contact_id") @db.Uuid
+  tagId      String   @map("tag_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  // Composite primary key makes duplicate assignments impossible at the
+  // database level (idempotency is a property of the schema, not the code).
+  @@id([contactId, tagId])
+  @@index([tagId])
+  @@map("contact_tags")
+}
+
+model ContactActivity {
+  id        String              @id @default(uuid()) @db.Uuid
+  contactId String              @map("contact_id") @db.Uuid
+  accountId String              @map("account_id") @db.Uuid
+  type      ContactActivityType
+  // Structured payload (e.g. { "tagName": "VIP" }, { "changedFields": [...] })
+  // rendered as human-readable text by the UI.
+  metadata  Json?
+  createdAt DateTime            @default(now()) @map("created_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, createdAt(sort: Desc)])
+  @@index([accountId, createdAt])
+  @@map("contact_activities")
+}
+
+enum ContactActivityType {
+  CONTACT_UPDATED
+  TAG_ADDED
+  TAG_REMOVED
+}
+
